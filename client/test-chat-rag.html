@@ -698,7 +698,15 @@
              * @returns {string} Отформатированный HTML
              */
             formatMessageContent(content) {
-                return content
+                // Проверка на null/undefined и конвертация в строку
+                if (content === null || content === undefined) {
+                    return 'Нет содержимого';
+                }
+                
+                // Конвертация в строку если это не строка
+                const contentStr = String(content);
+                
+                return contentStr
                     .replace(/\n/g, '<br>')
                     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                     .replace(/\*(.*?)\*/g, '<em>$1</em>');
@@ -728,10 +736,14 @@
                 html += '<div class="found-docs">';
                 ragAnalysis.foundDocuments.forEach((doc, index) => {
                     const score = doc.score ? ` (${(doc.score * 100).toFixed(1)}%)` : '';
+                    const title = doc.title || 'Без названия';
+                    const category = doc.category || 'Общее';
+                    const language = doc.language || 'unknown';
+                    
                     html += `<div class="doc-item">
-                        <strong>${index + 1}. ${doc.title || 'Без названия'}</strong>${score}
+                        <strong>${index + 1}. ${this.formatMessageContent(title)}</strong>${score}
                         <div style="font-size: 0.8em; opacity: 0.7;">
-                            ${doc.category || 'Общее'} • ${doc.language || 'unknown'}
+                            ${category} • ${language}
                         </div>
                     </div>`;
                 });
@@ -771,7 +783,7 @@
                 const responseArea = document.getElementById('responseArea');
                 const errorDiv = document.createElement('div');
                 errorDiv.className = 'error';
-                errorDiv.innerHTML = `<strong>❌ Ошибка:</strong> ${message}`;
+                errorDiv.innerHTML = `<strong>❌ Ошибка:</strong> ${this.formatMessageContent(message)}`;
                 responseArea.appendChild(errorDiv);
                 responseArea.scrollTop = responseArea.scrollHeight;
             }
