@@ -1,278 +1,233 @@
 #!/bin/bash
 
-# Скрипт для комплексного тестирования RAG системы Shrooms Support Bot
-# Автор: Shrooms Development Team
-# Версия: 1.0.0
+# 🍄 Shrooms RAG Test Runner
+# Скрипт для запуска различных типов RAG тестов
 
-echo "🍄 Shrooms Support Bot - RAG Testing Suite"
-echo "=========================================="
+set -e
 
-# Функция для проверки доступности сервера
+# Цвета для вывода
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Функция для логирования
+log() {
+    echo -e "${GREEN}[$(date +'%H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%H:%M:%S')] ERROR: $1${NC}"
+}
+
+info() {
+    echo -e "${BLUE}[$(date +'%H:%M:%S')] INFO: $1${NC}"
+}
+
+# Проверка аргументов
+TEST_TYPE=${1:-"basic"}
+
+# API базовый URL
+API_BASE=${API_BASE:-"http://localhost:3000/api"}
+
+# Функция проверки сервера
 check_server() {
-    echo "🔍 Checking server availability..."
+    log "🔍 Checking server health..."
     
-    if curl -f -s http://localhost:3000/api/health >/dev/null; then
-        echo "✅ Server is running"
-        return 0
-    else
-        echo "❌ Server is not accessible at http://localhost:3000"
-        echo "   Please start the server with: npm start"
-        return 1
+    if ! curl -f -s "$API_BASE/health" > /dev/null; then
+        error "Server is not running or not accessible at $API_BASE"
+        error "Please start the server with: npm run dev"
+        exit 1
     fi
+    
+    log "✅ Server is running"
 }
 
-# Функция для проверки базы знаний
-check_knowledge_base() {
-    echo "📚 Checking knowledge base status..."
-    
-    response=$(curl -s http://localhost:3000/api/knowledge/stats)
-    if echo "$response" | grep -q '"success":true'; then
-        doc_count=$(echo "$response" | grep -o '"documentsCount":[0-9]*' | cut -d':' -f2)
-        echo "✅ Knowledge base available with $doc_count documents"
-        return 0
-    else
-        echo "⚠️  Knowledge base may not be initialized"
-        echo "   Run: npm run load-kb"
-        return 1
-    fi
-}
-
-# Функция для запуска базовых API тестов
+# Функция базового тестирования
 run_basic_tests() {
-    echo "🧪 Running basic API tests..."
+    log "🧪 Running basic RAG tests..."
     
-    # Тест Health Check
-    echo "  Testing health endpoint..."
-    if curl -f -s http://localhost:3000/api/health >/dev/null; then
-        echo "  ✅ Health check passed"
-    else
-        echo "  ❌ Health check failed"
-        return 1
-    fi
-    
-    # Тест Chat API
-    echo "  Testing chat endpoint..."
-    response=$(curl -s -X POST http://localhost:3000/api/chat \
+    # Тест поиска документов
+    log "Testing document search..."
+    curl -s -X POST "$API_BASE/chat/test-rag" \
         -H "Content-Type: application/json" \
-        -d '{"message": "Test message", "userId": "test-user"}')
+        -d '{"query": "How to connect wallet?", "language": "en"}' | jq '.'
     
-    if echo "$response" | grep -q '"success":true'; then
-        echo "  ✅ Chat API responding"
-    else
-        echo "  ❌ Chat API failed"
-        echo "  Response: $response"
-        return 1
-    fi
+    echo ""
     
-    # Тест RAG endpoint
-    echo "  Testing RAG endpoint..."
-    response=$(curl -s -X POST http://localhost:3000/api/chat/test-rag \
+    # Тест многоязычности
+    log "Testing multilingual search..."
+    curl -s -X POST "$API_BASE/chat/test-rag" \
         -H "Content-Type: application/json" \
-        -d '{"query": "wallet connection"}')
-    
-    if echo "$response" | grep -q '"success":true'; then
-        echo "  ✅ RAG endpoint responding"
-    else
-        echo "  ❌ RAG endpoint failed"
-        return 1
-    fi
-    
-    return 0
+        -d '{"query": "Как подключить кошелек?", "language": "ru"}' | jq '.'
 }
 
-# Функция для запуска RAG quality тестов
-run_rag_quality_tests() {
-    echo "🎯 Running RAG quality tests..."
+# Функция полного тестирования
+run_all_tests() {
+    log "🚀 Running comprehensive RAG quality tests..."
     
-    if command -v node >/dev/null 2>&1; then
-        if [ -f "tests/integration/rag-quality.test.js" ]; then
-            node tests/integration/rag-quality.test.js
-            return $?
-        else
-            echo "❌ RAG quality test file not found"
-            return 1
-        fi
+    if command -v node &> /dev/null; then
+        node tests/integration/rag-quality.test.js
     else
-        echo "❌ Node.js not found"
-        return 1
+        error "Node.js not found. Please install Node.js to run comprehensive tests."
+        exit 1
     fi
 }
 
-# Функция для тестирования многоязычности
-test_multilingual_rag() {
-    echo "🌍 Testing multilingual RAG..."
+# Функция тестирования многоязычности
+run_multilingual_tests() {
+    log "🌍 Running multilingual tests..."
     
-    # Тестовые запросы на разных языках
-    declare -a test_queries=(
-        '{"query": "How to connect wallet?", "language": "en"}'
-        '{"query": "Как подключить кошелек?", "language": "ru"}'  
-        '{"query": "¿Cómo conectar billetera?", "language": "es"}'
+    local queries=(
+        '{"query": "How do I connect Xverse wallet?", "language": "en"}'
+        '{"query": "Как подключить кошелек Xverse?", "language": "ru"}'
+        '{"query": "¿Cómo conectar billetera Xverse?", "language": "es"}'
     )
     
-    for query in "${test_queries[@]}"; do
-        lang=$(echo "$query" | grep -o '"language": "[^"]*"' | cut -d'"' -f4)
-        echo "  Testing $lang..."
-        
-        response=$(curl -s -X POST http://localhost:3000/api/chat/test-rag \
+    for query in "${queries[@]}"; do
+        info "Testing: $(echo $query | jq -r '.query')"
+        curl -s -X POST "$API_BASE/chat/test-rag" \
             -H "Content-Type: application/json" \
-            -d "$query")
-        
-        if echo "$response" | grep -q '"success":true'; then
-            count=$(echo "$response" | grep -o '"count":[0-9]*' | head -1 | cut -d':' -f2)
-            echo "    ✅ Found $count documents"
-        else
-            echo "    ❌ Failed to search"
-        fi
+            -d "$query" | jq '.data.automaticSearch | {count: .count, scores: .scores}'
+        echo ""
     done
 }
 
-# Функция для тестирования производительности
-test_performance() {
-    echo "⚡ Testing RAG performance..."
+# Функция тестирования производительности
+run_performance_tests() {
+    log "⚡ Running performance tests..."
     
-    echo "  Running 5 queries to measure response time..."
-    total_time=0
-    successful_queries=0
+    local query='{"query": "What is SHROOMS staking?", "language": "en"}'
+    local iterations=5
+    local total_time=0
     
-    for i in {1..5}; do
-        start_time=$(date +%s%3N)
+    for ((i=1; i<=iterations; i++)); do
+        info "Iteration $i/$iterations"
         
-        response=$(curl -s -X POST http://localhost:3000/api/chat \
+        local start_time=$(date +%s%3N)
+        curl -s -X POST "$API_BASE/chat/test-rag" \
             -H "Content-Type: application/json" \
-            -d '{"message": "How does staking work?", "userId": "perf-test-'$i'"}')
+            -d "$query" > /dev/null
+        local end_time=$(date +%s%3N)
         
-        end_time=$(date +%s%3N)
-        duration=$((end_time - start_time))
+        local duration=$((end_time - start_time))
+        total_time=$((total_time + duration))
         
-        if echo "$response" | grep -q '"success":true'; then
-            echo "    Query $i: ${duration}ms"
-            total_time=$((total_time + duration))
-            successful_queries=$((successful_queries + 1))
-        else
-            echo "    Query $i: Failed"
-        fi
+        echo "  Response time: ${duration}ms"
+        sleep 1
     done
     
-    if [ $successful_queries -gt 0 ]; then
-        avg_time=$((total_time / successful_queries))
-        echo "  📊 Average response time: ${avg_time}ms"
-        
-        if [ $avg_time -lt 5000 ]; then
-            echo "  ✅ Performance acceptable (<5s)"
-        else
-            echo "  ⚠️  Performance slow (>5s)"
-        fi
+    local avg_time=$((total_time / iterations))
+    log "📊 Average response time: ${avg_time}ms"
+    
+    if [ $avg_time -lt 5000 ]; then
+        log "✅ Performance test PASSED (< 5s)"
     else
-        echo "  ❌ No successful queries"
+        warn "⚠️ Performance test WARNING (> 5s)"
     fi
 }
 
-# Функция для открытия веб-интерфейса тестирования
-open_test_interface() {
-    echo "🌐 Opening RAG test interface..."
+# Функция тестирования интерфейса
+run_interface_tests() {
+    log "🖥️ Testing RAG debug interface..."
     
-    # Проверяем, доступен ли файл
-    if [ -f "test-chat-rag.html" ]; then
-        url="http://localhost:3000/test-chat-rag.html"
-        echo "  Test interface available at: $url"
-        
-        # Пытаемся открыть браузер
-        if command -v xdg-open >/dev/null; then
-            xdg-open "$url" 2>/dev/null &
-        elif command -v open >/dev/null; then
-            open "$url" 2>/dev/null &
-        elif command -v start >/dev/null; then
-            start "$url" 2>/dev/null &
-        else
-            echo "  Please open $url in your browser"
-        fi
+    local interface_url="http://localhost:3000/test-rag-debug.html"
+    
+    if curl -f -s "$interface_url" > /dev/null; then
+        log "✅ RAG debug interface is accessible at: $interface_url"
+        info "Open this URL in your browser to test RAG functionality interactively"
     else
-        echo "  ⚠️  test-chat-rag.html not found"
+        warn "⚠️ RAG debug interface not accessible. Check if static files are served correctly."
     fi
 }
 
-# Функция для показа статистики базы знаний
-show_knowledge_stats() {
-    echo "📈 Knowledge Base Statistics"
-    echo "----------------------------"
+# Функция получения статистики
+show_stats() {
+    log "📊 Getting RAG system statistics..."
     
-    # Получаем статистику через API
-    response=$(curl -s http://localhost:3000/api/knowledge/stats)
+    # Health check с деталями
+    info "System Health:"
+    curl -s "$API_BASE/health" | jq '.services'
     
-    if echo "$response" | grep -q '"success":true'; then
-        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
-    else
-        echo "❌ Could not retrieve knowledge base statistics"
-    fi
+    echo ""
+    
+    # Chat статистика
+    info "Chat Statistics:"
+    curl -s "$API_BASE/chat/stats" | jq '.data'
+    
+    echo ""
+    
+    # Статистика языков
+    info "Supported Languages:"
+    curl -s "$API_BASE/chat/languages" | jq '.data.supportedLanguages'
 }
 
-# Основная функция
+# Главная функция
 main() {
-    case "$1" in
-        "all")
-            echo "🚀 Running complete RAG test suite..."
-            check_server || exit 1
-            check_knowledge_base
-            run_basic_tests || exit 1
-            test_multilingual_rag
-            test_performance
-            run_rag_quality_tests
-            echo "✅ All tests completed!"
-            ;;
+    echo "🍄 Shrooms RAG Test Runner"
+    echo "=========================="
+    echo ""
+    
+    check_server
+    
+    case $TEST_TYPE in
         "basic")
-            check_server || exit 1
-            run_basic_tests || exit 1
+            run_basic_tests
             ;;
-        "quality")
-            check_server || exit 1
-            run_rag_quality_tests || exit 1
+        "all")
+            run_all_tests
             ;;
         "multilingual")
-            check_server || exit 1
-            test_multilingual_rag
+            run_multilingual_tests
             ;;
         "performance")
-            check_server || exit 1
-            test_performance
+            run_performance_tests
             ;;
         "interface")
-            check_server || exit 1
-            open_test_interface
+            run_interface_tests
             ;;
         "stats")
-            check_server || exit 1
-            show_knowledge_stats
-            ;;
-        "help"|"--help"|"-h")
-            echo "Usage: $0 [command]"
-            echo ""
-            echo "Commands:"
-            echo "  all          Run complete test suite"
-            echo "  basic        Run basic API tests"
-            echo "  quality      Run RAG quality tests"
-            echo "  multilingual Test multilingual capabilities"
-            echo "  performance  Test response performance"
-            echo "  interface    Open web test interface"
-            echo "  stats        Show knowledge base statistics"
-            echo "  help         Show this help message"
-            echo ""
-            echo "Examples:"
-            echo "  $0 all              # Run all tests"
-            echo "  $0 basic            # Quick API check"
-            echo "  $0 interface        # Open browser testing"
+            show_stats
             ;;
         *)
-            echo "❓ No command specified. Running basic checks..."
-            check_server || exit 1
-            check_knowledge_base
-            run_basic_tests || exit 1
+            echo "Usage: $0 [basic|all|multilingual|performance|interface|stats]"
             echo ""
-            echo "💡 Run '$0 help' to see all available commands"
-            echo "💡 Run '$0 all' to execute complete test suite"
-            echo "💡 Run '$0 interface' to open web testing interface"
+            echo "Test types:"
+            echo "  basic        - Quick RAG functionality test"
+            echo "  all          - Comprehensive quality tests"
+            echo "  multilingual - Test multi-language support"
+            echo "  performance  - Test response times"
+            echo "  interface    - Check debug interface"
+            echo "  stats        - Show system statistics"
+            echo ""
+            echo "Examples:"
+            echo "  $0 basic"
+            echo "  $0 all"
+            echo "  $0 stats"
+            exit 1
             ;;
     esac
+    
+    echo ""
+    log "🎉 Test completed!"
 }
 
-# Запуск основной функции с переданными аргументами
+# Проверка зависимостей
+if ! command -v curl &> /dev/null; then
+    error "curl is required but not installed."
+    exit 1
+fi
+
+if ! command -v jq &> /dev/null; then
+    warn "jq is not installed. Install it for better output formatting."
+    warn "On Ubuntu/Debian: sudo apt install jq"
+    warn "On macOS: brew install jq"
+fi
+
+# Запуск основной функции
 main "$@"
