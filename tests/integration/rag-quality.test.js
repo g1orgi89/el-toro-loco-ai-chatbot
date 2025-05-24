@@ -1,823 +1,427 @@
 /**
- * @fileoverview Исправленные автоматизированные тесты для проверки RAG качества
- * @description Тестирует качество ответов с использованием RAG vs без RAG
- * 🍄 ИСПРАВЛЕНО: Работает с реальными API endpoints сервера
+ * @fileoverview Интеграционные тесты для качественной проверки RAG системы
+ * Проверяет качество поиска документов, релевантность ответов и многоязычность
+ * @author Shrooms Development Team
  */
 
-const fs = require('fs');
-const path = require('path');
+const { describe, beforeAll, afterAll, it, expect } = require('@jest/globals');
+const request = require('supertest');
+const app = require('../../server/index');
+const mongoose = require('mongoose');
 
 /**
- * Тестовые сценарии для проверки RAG
- * 🍄 ОБНОВЛЕНО: Расширенные тестовые сценарии для грибной тематики
+ * @typedef {Object} RAGTestCase
+ * @property {string} query - Поисковый запрос
+ * @property {string} language - Язык запроса
+ * @property {boolean} shouldFindDocs - Должны ли быть найдены документы
+ * @property {string[]} expectedCategories - Ожидаемые категории документов
+ * @property {number} minRelevanceScore - Минимальный score релевантности
+ * @property {string} description - Описание теста
  */
-const RAG_TEST_SCENARIOS = {
-  // Вопросы, на которые должны быть ответы в базе знаний
-  knowledgeBaseQuestions: {
-    en: [
-      {
-        query: "How do I connect Xverse wallet?",
-        expectedTopics: ["xverse", "wallet", "connect", "browser", "extension"],
-        category: "user-guide",
-        shouldFindDocs: true,
-        priority: "high"
-      },
-      {
-        query: "What is SHROOMS staking?",
-        expectedTopics: ["staking", "shrooms", "rewards", "apy"],
-        category: "tokenomics", 
-        shouldFindDocs: true,
-        priority: "high"
-      },
-      {
-        query: "How does farming work in Shrooms?",
-        expectedTopics: ["farming", "liquidity", "rewards", "pools"],
-        category: "tokenomics",
-        shouldFindDocs: true,
-        priority: "medium"
-      },
-      {
-        query: "What is SHROOMS token?",
-        expectedTopics: ["shrooms", "token", "cryptocurrency", "stacks"],
-        category: "general",
-        shouldFindDocs: true,
-        priority: "high"
-      },
-      {
-        query: "How to buy SHROOMS tokens?",
-        expectedTopics: ["buy", "exchange", "dex", "stacks"],
-        category: "general",
-        shouldFindDocs: false, // Может не быть в базе знаний
-        priority: "medium"
-      }
-    ],
-    ru: [
-      {
-        query: "Как подключить кошелек Xverse?",
-        expectedTopics: ["xverse", "кошелек", "подключ", "расширение"],
-        category: "user-guide",
-        shouldFindDocs: true,
-        priority: "high"
-      },
-      {
-        query: "Что такое стейкинг SHROOMS?",
-        expectedTopics: ["стейкинг", "shrooms", "вознаграждения"],
-        category: "tokenomics",
-        shouldFindDocs: true,
-        priority: "high"
-      },
-      {
-        query: "Как работает фарминг в Shrooms?",
-        expectedTopics: ["фарминг", "ликвидность", "пулы"],
-        category: "tokenomics",
-        shouldFindDocs: true,
-        priority: "medium"
-      },
-      {
-        query: "Что такое токен SHROOMS?",
-        expectedTopics: ["shrooms", "токен", "криптовалюта"],
-        category: "general",
-        shouldFindDocs: true,
-        priority: "high"
-      }
-    ],
-    es: [
-      {
-        query: "¿Cómo conectar billetera Xverse?",
-        expectedTopics: ["xverse", "billetera", "conectar"],
-        category: "user-guide",
-        shouldFindDocs: true,
-        priority: "high"
-      },
-      {
-        query: "¿Qué es el staking de SHROOMS?",
-        expectedTopics: ["staking", "shrooms", "recompensas"],
-        category: "tokenomics",
-        shouldFindDocs: false, // Может не быть документов на испанском
-        priority: "medium"
-      }
-    ]
-  },
 
-  // Вопросы, на которые НЕ должно быть ответов в базе знаний
-  offTopicQuestions: {
-    en: [
-      {
-        query: "What's the weather today?",
-        expectedTopics: [],
-        category: "off-topic",
-        shouldFindDocs: false,
-        priority: "high"
-      },
-      {
-        query: "Tell me about Bitcoin price",
-        expectedTopics: [],
-        category: "off-topic", 
-        shouldFindDocs: false,
-        priority: "medium"
-      },
-      {
-        query: "How to cook pasta?",
-        expectedTopics: [],
-        category: "off-topic",
-        shouldFindDocs: false,
-        priority: "medium"
-      },
-      {
-        query: "What is machine learning?",
-        expectedTopics: [],
-        category: "off-topic",
-        shouldFindDocs: false,
-        priority: "low"
-      }
-    ],
-    ru: [
-      {
-        query: "Какая сегодня погода?",
-        expectedTopics: [],
-        category: "off-topic",
-        shouldFindDocs: false,
-        priority: "high"
-      },
-      {
-        query: "Расскажи о цене биткоина",
-        expectedTopics: [],
-        category: "off-topic",
-        shouldFindDocs: false,
-        priority: "medium"
-      },
-      {
-        query: "Как приготовить борщ?",
-        expectedTopics: [],
-        category: "off-topic",
-        shouldFindDocs: false,
-        priority: "low"
-      }
-    ]
-  },
+describe('RAG Quality Integration Tests', () => {
+    let server;
+    
+    beforeAll(async () => {
+        // Подключение к тестовой базе данных
+        if (mongoose.connection.readyState === 0) {
+            await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/shrooms-support-test');
+        }
+        
+        // Запуск сервера
+        server = app.listen(0);
+        
+        // Инициализация векторной базы знаний с тестовыми данными
+        await setupTestKnowledgeBase();
+    });
 
-  // Пограничные случаи
-  borderlineCases: {
-    en: [
-      {
-        query: "What is blockchain?", // Общий вопрос о блокчейне
-        expectedTopics: ["blockchain", "stacks"],
-        category: "borderline",
-        shouldFindDocs: false, // Если нет общих статей о блокчейне
-        priority: "medium"
-      },
-      {
-        query: "How to buy cryptocurrency?", // Общий крипто вопрос
-        expectedTopics: [],
-        category: "borderline",
-        shouldFindDocs: false,
-        priority: "low"
-      },
-      {
-        query: "What is Web3?", // Связанная тема
-        expectedTopics: ["web3"],
-        category: "borderline", 
-        shouldFindDocs: false,
-        priority: "low"
-      }
-    ]
-  }
-};
+    afterAll(async () => {
+        if (server) {
+            await new Promise((resolve) => server.close(resolve));
+        }
+        
+        if (mongoose.connection.readyState !== 0) {
+            await mongoose.connection.close();
+        }
+    });
+
+    /**
+     * Тест релевантности поиска документов для различных запросов
+     */
+    describe('Document Relevance Tests', () => {
+        /** @type {RAGTestCase[]} */
+        const relevanceTestCases = [
+            {
+                query: 'как подключить кошелек Xverse',
+                language: 'ru',
+                shouldFindDocs: true,
+                expectedCategories: ['user-guide'],
+                minRelevanceScore: 0.7,
+                description: 'Поиск инструкций по подключению кошелька'
+            },
+            {
+                query: 'SHROOMS token информация',
+                language: 'ru',
+                shouldFindDocs: true,
+                expectedCategories: ['tokenomics'],
+                minRelevanceScore: 0.6,
+                description: 'Информация о токене SHROOMS'
+            },
+            {
+                query: 'farming yield доходность',
+                language: 'ru',
+                shouldFindDocs: true,
+                expectedCategories: ['user-guide', 'tokenomics'],
+                minRelevanceScore: 0.6,
+                description: 'Информация о доходности фарминга'
+            },
+            {
+                query: 'how to connect Xverse wallet',
+                language: 'en',
+                shouldFindDocs: true,
+                expectedCategories: ['user-guide'],
+                minRelevanceScore: 0.7,
+                description: 'English wallet connection guide'
+            },
+            {
+                query: 'cómo conectar billetera Xverse',
+                language: 'es',
+                shouldFindDocs: true,
+                expectedCategories: ['user-guide'],
+                minRelevanceScore: 0.6,
+                description: 'Spanish wallet connection guide'
+            }
+        ];
+
+        relevanceTestCases.forEach((testCase) => {
+            it(`should find relevant documents: ${testCase.description}`, async () => {
+                const response = await request(app)
+                    .post('/api/chat')
+                    .send({
+                        message: testCase.query,
+                        userId: 'rag-test-user',
+                        language: testCase.language
+                    });
+
+                expect(response.status).toBe(200);
+                expect(response.body.success).toBe(true);
+
+                const { ragAnalysis } = response.body.data;
+
+                if (testCase.shouldFindDocs) {
+                    expect(ragAnalysis).toBeDefined();
+                    expect(ragAnalysis.foundDocuments).toBeInstanceOf(Array);
+                    expect(ragAnalysis.foundDocuments.length).toBeGreaterThan(0);
+
+                    // Проверка релевантности
+                    const topDoc = ragAnalysis.foundDocuments[0];
+                    expect(topDoc.score).toBeGreaterThanOrEqual(testCase.minRelevanceScore);
+
+                    // Проверка категорий
+                    const foundCategories = ragAnalysis.foundDocuments.map(doc => doc.category);
+                    const hasExpectedCategory = testCase.expectedCategories.some(cat => 
+                        foundCategories.includes(cat)
+                    );
+                    expect(hasExpectedCategory).toBe(true);
+
+                    // Проверка языка документов
+                    const docLanguages = ragAnalysis.foundDocuments.map(doc => doc.language);
+                    const hasCorrectLanguage = docLanguages.includes(testCase.language) || 
+                                             docLanguages.includes('en'); // English как fallback
+                    expect(hasCorrectLanguage).toBe(true);
+                }
+            });
+        });
+    });
+
+    /**
+     * Тест фильтрации off-topic запросов
+     */
+    describe('Off-topic Filtering Tests', () => {
+        /** @type {string[]} */
+        const offTopicQueries = [
+            'какая погода в Москве',
+            'рецепт борща',
+            'как играть в футбол',
+            'what is the capital of France',
+            'how to cook pasta',
+            'latest news about politics'
+        ];
+
+        offTopicQueries.forEach((query) => {
+            it(`should handle off-topic query: "${query}"`, async () => {
+                const response = await request(app)
+                    .post('/api/chat')
+                    .send({
+                        message: query,
+                        userId: 'rag-test-offtopic',
+                        language: 'ru'
+                    });
+
+                expect(response.status).toBe(200);
+                expect(response.body.success).toBe(true);
+
+                const assistantResponse = response.body.data.response.toLowerCase();
+                
+                // Ответ должен указывать на ограниченность знаний или предлагать помощь по Shrooms
+                const indicatesLimitation = 
+                    assistantResponse.includes('не могу помочь') ||
+                    assistantResponse.includes('не знаю') ||
+                    assistantResponse.includes('вне моей компетенции') ||
+                    assistantResponse.includes('о проекте shrooms') ||
+                    assistantResponse.includes('касается нашего проекта');
+
+                expect(indicatesLimitation).toBe(true);
+            });
+        });
+    });
+
+    /**
+     * Тест многоязычной консистентности
+     */
+    describe('Multilingual Consistency Tests', () => {
+        /** @type {Object<string, string>} */
+        const multilingualQueries = {
+            ru: 'Что такое токен SHROOMS?',
+            en: 'What is SHROOMS token?',
+            es: '¿Qué es el token SHROOMS?'
+        };
+
+        it('should provide consistent information across languages', async () => {
+            const responses = {};
+
+            // Получение ответов на всех языках
+            for (const [lang, query] of Object.entries(multilingualQueries)) {
+                const response = await request(app)
+                    .post('/api/chat')
+                    .send({
+                        message: query,
+                        userId: `rag-test-multilang-${lang}`,
+                        language: lang
+                    });
+
+                expect(response.status).toBe(200);
+                expect(response.body.success).toBe(true);
+                
+                responses[lang] = response.body.data;
+            }
+
+            // Проверка консистентности RAG данных
+            const ragAnalyses = Object.values(responses).map(r => r.ragAnalysis);
+            
+            // Все языки должны найти документы о токене
+            ragAnalyses.forEach(analysis => {
+                expect(analysis).toBeDefined();
+                expect(analysis.foundDocuments).toBeInstanceOf(Array);
+                expect(analysis.foundDocuments.length).toBeGreaterThan(0);
+            });
+
+            // Проверка, что найдены документы о токеномике
+            ragAnalyses.forEach(analysis => {
+                const hasTokenomicsDoc = analysis.foundDocuments.some(doc => 
+                    doc.category === 'tokenomics' || 
+                    doc.title.toLowerCase().includes('token')
+                );
+                expect(hasTokenomicsDoc).toBe(true);
+            });
+        });
+    });
+
+    /**
+     * Тест производительности RAG системы
+     */
+    describe('Performance Tests', () => {
+        it('should respond within acceptable time limits', async () => {
+            const startTime = Date.now();
+
+            const response = await request(app)
+                .post('/api/chat')
+                .send({
+                    message: 'Расскажи о фарминге SHROOMS',
+                    userId: 'rag-test-performance',
+                    language: 'ru'
+                });
+
+            const responseTime = Date.now() - startTime;
+
+            expect(response.status).toBe(200);
+            expect(response.body.success).toBe(true);
+            
+            // Общее время ответа не должно превышать 10 секунд
+            expect(responseTime).toBeLessThan(10000);
+
+            // Время поиска в базе знаний не должно превышать 2 секунд
+            const { ragAnalysis } = response.body.data;
+            if (ragAnalysis && ragAnalysis.searchTime) {
+                expect(ragAnalysis.searchTime).toBeLessThan(2000);
+            }
+        });
+
+        it('should handle concurrent requests efficiently', async () => {
+            const concurrentRequests = 5;
+            const promises = [];
+
+            for (let i = 0; i < concurrentRequests; i++) {
+                const promise = request(app)
+                    .post('/api/chat')
+                    .send({
+                        message: `Тест конкурентности ${i + 1}`,
+                        userId: `rag-test-concurrent-${i}`,
+                        language: 'ru'
+                    });
+                promises.push(promise);
+            }
+
+            const startTime = Date.now();
+            const responses = await Promise.all(promises);
+            const totalTime = Date.now() - startTime;
+
+            // Все запросы должны быть успешными
+            responses.forEach((response, index) => {
+                expect(response.status).toBe(200);
+                expect(response.body.success).toBe(true);
+            });
+
+            // Общее время обработки всех запросов не должно превышать 15 секунд
+            expect(totalTime).toBeLessThan(15000);
+        });
+    });
+
+    /**
+     * Тест качества ответов с RAG vs без RAG
+     */
+    describe('RAG vs Non-RAG Quality Comparison', () => {
+        it('should provide more detailed answers with RAG', async () => {
+            const query = 'Как работает фарминг SHROOMS?';
+
+            // Запрос с RAG (обычный)
+            const ragResponse = await request(app)
+                .post('/api/chat')
+                .send({
+                    message: query,
+                    userId: 'rag-test-comparison-with',
+                    language: 'ru'
+                });
+
+            expect(ragResponse.status).toBe(200);
+            expect(ragResponse.body.success).toBe(true);
+
+            const ragAnswer = ragResponse.body.data.response;
+            const hasRAGData = ragResponse.body.data.ragAnalysis && 
+                              ragResponse.body.data.ragAnalysis.foundDocuments.length > 0;
+
+            // Проверка качества ответа с RAG
+            if (hasRAGData) {
+                // Ответ должен быть достаточно подробным
+                expect(ragAnswer.length).toBeGreaterThan(100);
+                
+                // Ответ должен содержать специфическую информацию
+                const containsSpecificInfo = 
+                    ragAnswer.toLowerCase().includes('пул') ||
+                    ragAnswer.toLowerCase().includes('ликвидность') ||
+                    ragAnswer.toLowerCase().includes('доходность') ||
+                    ragAnswer.toLowerCase().includes('stx');
+
+                expect(containsSpecificInfo).toBe(true);
+            }
+        });
+    });
+
+    /**
+     * Тест создания тикетов для сложных технических вопросов
+     */
+    describe('Ticket Creation Tests', () => {
+        /** @type {string[]} */
+        const technicalProblemQueries = [
+            'Моя транзакция зависла уже 3 часа, что делать?',
+            'Ошибка при подключении кошелька: connection failed',
+            'Не могу получить доступ к моим токенам SHROOMS',
+            'Проблема с фармингом: пул не отображается',
+            'Urgent: tokens disappeared from wallet'
+        ];
+
+        technicalProblemQueries.forEach((query) => {
+            it(`should create ticket for technical problem: "${query.substring(0, 50)}..."`, async () => {
+                const response = await request(app)
+                    .post('/api/chat')
+                    .send({
+                        message: query,
+                        userId: 'rag-test-ticket',
+                        language: 'ru'
+                    });
+
+                expect(response.status).toBe(200);
+                expect(response.body.success).toBe(true);
+
+                const { ticketCreated, ticketId } = response.body.data;
+                
+                // Должен быть создан тикет для технических проблем
+                expect(ticketCreated).toBe(true);
+                expect(ticketId).toBeDefined();
+                expect(typeof ticketId).toBe('string');
+                expect(ticketId.length).toBeGreaterThan(0);
+            });
+        });
+    });
+});
 
 /**
- * Класс для тестирования RAG качества
- * 🍄 ИСПРАВЛЕНО: Совместим с реальными API endpoints
+ * Настройка тестовой базы знаний
+ * Создает минимальный набор документов для тестирования RAG
  */
-class RAGQualityTester {
-  constructor(apiBase = 'http://localhost:3000/api') {
-    this.apiBase = apiBase;
-    this.results = {
-      totalTests: 0,
-      passedTests: 0,
-      failedTests: 0,
-      skippedTests: 0,
-      details: []
-    };
-    this.testStartTime = Date.now();
-  }
-
-  /**
-   * Запускает все тесты RAG
-   * 🍄 ОБНОВЛЕНО: Добавлен диагностический этап
-   */
-  async runAllTests() {
-    console.log('🍄 Starting Shrooms RAG Quality Tests...\n');
-    
-    try {
-      // Диагностика перед началом тестов
-      console.log('🔍 Running preliminary diagnostics...');
-      await this.runDiagnostics();
-      
-      // Тест 1: Проверка поиска в базе знаний
-      console.log('\n📚 Testing Knowledge Base Retrieval...');
-      await this.testKnowledgeBaseRetrieval();
-      
-      // Тест 2: Проверка фильтрации off-topic запросов
-      console.log('\n🚫 Testing Off-Topic Filtering...');
-      await this.testOffTopicFiltering();
-      
-      // Тест 3: Проверка многоязычности
-      console.log('\n🌍 Testing Multilingual RAG...');
-      await this.testMultilingualRAG();
-      
-      // Тест 4: Сравнение качества ответов с RAG и без RAG
-      console.log('\n🔄 Testing RAG vs No-RAG Quality...');
-      await this.testRAGQualityComparison();
-      
-      // Тест 5: Проверка производительности
-      console.log('\n⚡ Testing RAG Performance...');
-      await this.testRAGPerformance();
-      
-      // Тест 6: Проверка пограничных случаев
-      console.log('\n🔍 Testing Borderline Cases...');
-      await this.testBorderlineCases();
-      
-    } catch (error) {
-      console.error('❌ Test suite failed:', error.message);
-      this.results.details.push({
-        test: 'test_suite',
-        error: error.message,
-        passed: false
-      });
-    }
-    
-    this.generateReport();
-    return this.results;
-  }
-
-  /**
-   * 🍄 НОВОЕ: Диагностика системы перед тестами
-   */
-  async runDiagnostics() {
-    try {
-      // Проверка health endpoint
-      const healthResponse = await this.makeRequest('/health');
-      if (healthResponse && healthResponse.status === 'ok') {
-        console.log('  ✅ Server health check passed');
-        
-        // Логируем информацию о сервисах
-        if (healthResponse.services) {
-          console.log('  📊 Services status:');
-          Object.entries(healthResponse.services).forEach(([service, status]) => {
-            const emoji = status === 'ok' ? '✅' : '❌';
-            console.log(`    ${emoji} ${service}: ${status}`);
-          });
+async function setupTestKnowledgeBase() {
+    const testDocuments = [
+        {
+            title: 'Подключение кошелька Xverse',
+            content: 'Инструкция по подключению кошелька Xverse к платформе Shrooms. Шаги: 1) Установить расширение 2) Создать кошелек 3) Подключиться к сайту',
+            category: 'user-guide',
+            language: 'ru',
+            tags: ['кошелек', 'xverse', 'подключение']
+        },
+        {
+            title: 'How to connect Xverse wallet',
+            content: 'Guide for connecting Xverse wallet to Shrooms platform. Steps: 1) Install extension 2) Create wallet 3) Connect to website',
+            category: 'user-guide',
+            language: 'en',
+            tags: ['wallet', 'xverse', 'connection']
+        },
+        {
+            title: 'Токеномика SHROOMS',
+            content: 'Токен SHROOMS - основной токен экосистемы. Общее предложение: 100 миллионов. Распределение: 40% фарминг, 25% команда, 20% инвесторы, 15% маркетинг.',
+            category: 'tokenomics',
+            language: 'ru',
+            tags: ['токен', 'токеномика', 'распределение']
+        },
+        {
+            title: 'SHROOMS Tokenomics',
+            content: 'SHROOMS token is the main ecosystem token. Total supply: 100 million. Distribution: 40% farming, 25% team, 20% investors, 15% marketing.',
+            category: 'tokenomics',
+            language: 'en',
+            tags: ['token', 'tokenomics', 'distribution']
+        },
+        {
+            title: 'Фарминг и доходность',
+            content: 'Фарминг SHROOMS позволяет получать доходность до 12.5% годовых. Основные пулы: STX-SHROOMS и BTC-SHROOMS. Вознаграждения начисляются ежедневно.',
+            category: 'user-guide',
+            language: 'ru',
+            tags: ['фарминг', 'доходность', 'пулы']
         }
-      } else {
-        console.log('  ⚠️ Server health check returned non-OK status');
-      }
-
-      // Проверка chat health endpoint
-      const chatHealthResponse = await this.makeRequest('/chat/health');
-      if (chatHealthResponse && chatHealthResponse.success) {
-        console.log('  ✅ Chat API health check passed');
-      } else {
-        console.log('  ⚠️ Chat API health check failed');
-      }
-
-    } catch (error) {
-      console.log(`  ⚠️ Diagnostics warning: ${error.message}`);
-    }
-  }
-
-  /**
-   * Тестирует поиск релевантных документов
-   * 🍄 ИСПРАВЛЕНО: Использует правильный API endpoint
-   */
-  async testKnowledgeBaseRetrieval() {
-    const highPriorityQuestions = [];
-    
-    // Собираем вопросы высокого приоритета
-    for (const [language, questions] of Object.entries(RAG_TEST_SCENARIOS.knowledgeBaseQuestions)) {
-      for (const scenario of questions) {
-        if (scenario.priority === 'high') {
-          highPriorityQuestions.push({ ...scenario, language });
-        }
-      }
-    }
-    
-    console.log(`  Testing ${highPriorityQuestions.length} high-priority knowledge queries...`);
-    
-    for (const scenario of highPriorityQuestions) {
-      await this.runRetrievalTest(scenario, scenario.language);
-      await this.sleep(500); // Небольшая пауза между запросами
-    }
-    
-    // Тестируем также несколько средних и низких приоритетов
-    const otherQuestions = [];
-    for (const [language, questions] of Object.entries(RAG_TEST_SCENARIOS.knowledgeBaseQuestions)) {
-      for (const scenario of questions) {
-        if (scenario.priority !== 'high' && otherQuestions.length < 3) {
-          otherQuestions.push({ ...scenario, language });
-        }
-      }
-    }
-    
-    for (const scenario of otherQuestions) {
-      await this.runRetrievalTest(scenario, scenario.language);
-      await this.sleep(500);
-    }
-  }
-
-  /**
-   * Выполняет тест поиска для одного сценария
-   * 🍄 ИСПРАВЛЕНО: Правильное использование API
-   */
-  async runRetrievalTest(scenario, language) {
-    try {
-      const response = await this.makeRequest('/chat/test-rag', 'POST', {
-        query: scenario.query,
-        language: language,
-        thresholds: [0.9, 0.8, 0.7, 0.6, 0.5, 0.4]
-      });
-
-      this.totalTests++;
-
-      if (response && response.success) {
-        const foundDocs = response.data.automaticSearch?.count || 0;
-        const hasExpectedResults = scenario.shouldFindDocs ? foundDocs > 0 : foundDocs === 0;
-        
-        if (hasExpectedResults) {
-          this.passedTests++;
-          console.log(`    ✅ [${language}] "${scenario.query.substring(0, 40)}..." - Found ${foundDocs} docs (expected: ${scenario.shouldFindDocs ? '>0' : '0'})`);
-          
-          // Дополнительная проверка релевантности найденных документов
-          if (foundDocs > 0 && scenario.expectedTopics.length > 0) {
-            await this.checkDocumentRelevance(response.data.automaticSearch.documents, scenario.expectedTopics);
-          }
-        } else {
-          this.failedTests++;
-          console.log(`    ❌ [${language}] "${scenario.query.substring(0, 40)}..." - Found ${foundDocs} docs (expected: ${scenario.shouldFindDocs ? '>0' : '0'})`);
-        }
-
-        this.results.details.push({
-          test: 'knowledge_retrieval',
-          language: language,
-          query: scenario.query,
-          category: scenario.category,
-          priority: scenario.priority,
-          foundDocs: foundDocs,
-          expected: scenario.shouldFindDocs,
-          passed: hasExpectedResults,
-          scores: response.data.automaticSearch?.scores || []
-        });
-      } else {
-        this.failedTests++;
-        console.log(`    ❌ [${language}] "${scenario.query.substring(0, 40)}..." - API Error: ${response?.error || 'Unknown error'}`);
-        this.results.details.push({
-          test: 'knowledge_retrieval',
-          language: language,
-          query: scenario.query,
-          error: response?.error || 'API request failed',
-          passed: false
-        });
-      }
-    } catch (error) {
-      this.failedTests++;
-      console.log(`    ❌ [${language}] "${scenario.query.substring(0, 40)}..." - Error: ${error.message}`);
-      this.results.details.push({
-        test: 'knowledge_retrieval',
-        language: language,
-        query: scenario.query,
-        error: error.message,
-        passed: false
-      });
-    }
-  }
-
-  /**
-   * Проверяет релевантность найденных документов
-   * 🍄 ИСПРАВЛЕНО: Более интеллектуальная проверка релевантности
-   */
-  async checkDocumentRelevance(documents, expectedTopics) {
-    if (!documents || documents.length === 0) return;
-
-    let relevantDocs = 0;
-    for (const doc of documents) {
-      const content = (doc.preview || doc.content || '').toLowerCase();
-      const hasRelevantTopics = expectedTopics.some(topic => 
-        content.includes(topic.toLowerCase())
-      );
-      
-      if (hasRelevantTopics) {
-        relevantDocs++;
-      }
-    }
-
-    const relevanceRate = relevantDocs / documents.length;
-    if (relevanceRate >= 0.4) { // 40% документов должны быть релевантными (понижен порог)
-      console.log(`      📊 Document relevance: ${Math.round(relevanceRate * 100)}% (${relevantDocs}/${documents.length})`);
-    } else {
-      console.log(`      ⚠️ Low document relevance: ${Math.round(relevanceRate * 100)}% (${relevantDocs}/${documents.length})`);
-    }
-  }
-
-  /**
-   * Тестирует фильтрацию off-topic запросов
-   */
-  async testOffTopicFiltering() {
-    console.log('  Testing off-topic question filtering...');
-    
-    for (const [language, questions] of Object.entries(RAG_TEST_SCENARIOS.offTopicQuestions)) {
-      for (const scenario of questions) {
-        if (scenario.priority === 'high' || scenario.priority === 'medium') {
-          await this.runRetrievalTest(scenario, language);
-          await this.sleep(300);
-        }
-      }
-    }
-  }
-
-  /**
-   * 🍄 НОВОЕ: Тестирует пограничные случаи
-   */
-  async testBorderlineCases() {
-    console.log('  Testing borderline cases...');
-    
-    for (const [language, questions] of Object.entries(RAG_TEST_SCENARIOS.borderlineCases)) {
-      for (const scenario of questions) {
-        await this.runRetrievalTest(scenario, language);
-        await this.sleep(300);
-      }
-    }
-  }
-
-  /**
-   * Тестирует многоязычность RAG
-   * 🍄 ИСПРАВЛЕНО: Более реалистичное тестирование многоязычности
-   */
-  async testMultilingualRAG() {
-    console.log('  Testing multilingual consistency...');
-    
-    // Тестируем одинаковые вопросы на разных языках
-    const commonQuestions = {
-      wallet_connection: {
-        en: "How to connect wallet?",
-        ru: "Как подключить кошелек?",
-        es: "¿Cómo conectar billetera?"
-      },
-      staking_info: {
-        en: "What is staking?",
-        ru: "Что такое стейкинг?",
-        es: "¿Qué es el staking?"
-      }
-    };
-
-    for (const [topic, translations] of Object.entries(commonQuestions)) {
-      console.log(`    Testing topic: ${topic}`);
-      const results = {};
-      
-      for (const [lang, query] of Object.entries(translations)) {
-        try {
-          const response = await this.makeRequest('/chat/test-rag', 'POST', {
-            query: query,
-            language: lang
-          });
-
-          if (response && response.success) {
-            results[lang] = response.data.automaticSearch?.count || 0;
-          }
-          await this.sleep(300);
-        } catch (error) {
-          console.log(`      ❌ Error testing ${lang}: ${error.message}`);
-        }
-      }
-
-      // Проверяем, что все языки дают сопоставимые результаты
-      const docCounts = Object.values(results);
-      if (docCounts.length > 1) {
-        const maxDocs = Math.max(...docCounts);
-        const minDocs = Math.min(...docCounts);
-        const variance = maxDocs - minDocs;
-        
-        if (variance <= 3) { // Разница не более 3 документов (увеличен порог)
-          console.log(`      ✅ Consistent across languages: ${JSON.stringify(results)}`);
-          this.passedTests++;
-        } else {
-          console.log(`      ⚠️ High variance across languages: ${JSON.stringify(results)}`);
-          this.failedTests++;
-        }
-        this.totalTests++;
-      }
-    }
-  }
-
-  /**
-   * Сравнивает качество ответов с RAG и без RAG
-   * 🍄 ИСПРАВЛЕНО: Правильное использование chat API
-   */
-  async testRAGQualityComparison() {
-    console.log('  Comparing RAG vs Non-RAG response quality...');
-    
-    const testQueries = [
-      "How do I connect my wallet?",
-      "What are the staking rewards?",
-      "Как работает фарминг?"
     ];
 
-    for (const query of testQueries) {
-      try {
-        // Запрос без RAG
-        const responseWithoutRAG = await this.sendChatMessage(query, false);
-        await this.sleep(1000); // Пауза между запросами
-        
-        // Запрос с RAG
-        const responseWithRAG = await this.sendChatMessage(query, true);
-        await this.sleep(1000);
-        
-        if (responseWithoutRAG.success && responseWithRAG.success) {
-          const withoutRAGLength = responseWithoutRAG.data.message.length;
-          const withRAGLength = responseWithRAG.data.message.length;
-          const hasRAGData = responseWithRAG.data.metadata?.ragUsed || false;
-          const knowledgeUsed = responseWithRAG.data.metadata?.knowledgeResultsCount || 0;
-          
-          console.log(`    📝 "${query.substring(0, 30)}..."`);
-          console.log(`      Without RAG: ${withoutRAGLength} chars`);
-          console.log(`      With RAG: ${withRAGLength} chars (Knowledge: ${knowledgeUsed} docs, RAG used: ${hasRAGData})`);
-          
-          // Более разумная оценка: если RAG нашел знания, ответ должен быть более информативным
-          let testPassed = false;
-          let reason = '';
-          
-          if (hasRAGData && knowledgeUsed > 0) {
-            if (withRAGLength > withoutRAGLength * 1.1) { // 10% прирост достаточен
-              testPassed = true;
-              reason = 'RAG provides more detailed response';
-            } else {
-              testPassed = false;
-              reason = 'RAG response not significantly better despite using knowledge';
-            }
-          } else if (!hasRAGData || knowledgeUsed === 0) {
-            testPassed = true; // Нормально, если для запроса нет релевантных знаний
-            reason = 'No relevant knowledge found - expected behavior';
-          }
-          
-          if (testPassed) {
-            console.log(`      ✅ ${reason}`);
-            this.passedTests++;
-          } else {
-            console.log(`      ❌ ${reason}`);
-            this.failedTests++;
-          }
-          
-          this.totalTests++;
-          
-          this.results.details.push({
-            test: 'rag_comparison',
-            query: query,
-            withoutRAG: { length: withoutRAGLength },
-            withRAG: { length: withRAGLength, ragUsed: hasRAGData, knowledgeCount: knowledgeUsed },
-            passed: testPassed,
-            reason: reason
-          });
-        }
-      } catch (error) {
-        console.log(`    ❌ Error comparing responses: ${error.message}`);
-        this.failedTests++;
-        this.totalTests++;
-      }
-    }
-  }
-
-  /**
-   * Тестирует производительность RAG
-   * 🍄 ИСПРАВЛЕНО: Более реалистичные метрики производительности
-   */
-  async testRAGPerformance() {
-    console.log('  Testing RAG performance...');
-    
-    const testQuery = "How to connect wallet?";
-    const iterations = 3; // Уменьшено для более быстрого тестирования
-    const times = [];
-
-    for (let i = 0; i < iterations; i++) {
-      const startTime = Date.now();
-      
-      try {
-        const response = await this.sendChatMessage(testQuery, true);
-        const endTime = Date.now();
-        
-        if (response.success) {
-          times.push(endTime - startTime);
-        }
-        await this.sleep(1000); // Пауза между итерациями
-      } catch (error) {
-        console.log(`    ❌ Performance test iteration ${i + 1} failed: ${error.message}`);
-      }
-    }
-
-    if (times.length > 0) {
-      const avgTime = times.reduce((a, b) => a + b, 0) / times.length;
-      const maxTime = Math.max(...times);
-      const minTime = Math.min(...times);
-      
-      console.log(`    📊 Average response time: ${Math.round(avgTime)}ms (${iterations} iterations)`);
-      console.log(`    📊 Min/Max: ${minTime}ms / ${maxTime}ms`);
-      
-      // Более разумный порог для производительности (10 секунд)
-      if (avgTime < 10000) {
-        console.log(`    ✅ Performance within acceptable limits`);
-        this.passedTests++;
-      } else {
-        console.log(`    ❌ Performance too slow (${Math.round(avgTime)}ms > 10000ms)`);
-        this.failedTests++;
-      }
-      this.totalTests++;
-
-      this.results.details.push({
-        test: 'performance',
-        avgTime: avgTime,
-        maxTime: maxTime,
-        minTime: minTime,
-        iterations: times.length,
-        passed: avgTime < 10000
-      });
-    }
-  }
-
-  /**
-   * Отправляет сообщение в чат API
-   * 🍄 ИСПРАВЛЕНО: Правильное использование chat API
-   */
-  async sendChatMessage(message, useRAG = true) {
-    const userId = `rag-test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    return await this.makeRequest('/chat', 'POST', {
-      message: message,
-      userId: userId,
-      useRag: useRAG
-    });
-  }
-
-  /**
-   * 🍄 НОВОЕ: Вспомогательный метод для HTTP запросов
-   */
-  async makeRequest(endpoint, method = 'GET', body = null) {
-    const url = `${this.apiBase}${endpoint}`;
-    const options = {
-      method: method,
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    };
-
-    if (body && method !== 'GET') {
-      options.body = JSON.stringify(body);
-    }
-
-    const response = await fetch(url, options);
-    return await response.json();
-  }
-
-  /**
-   * 🍄 НОВОЕ: Пауза между запросами
-   */
-  async sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Генерирует отчет о тестировании
-   * 🍄 ОБНОВЛЕНО: Более детальный отчет
-   */
-  generateReport() {
-    const testDuration = Date.now() - this.testStartTime;
-    const successRate = this.totalTests > 0 ? Math.round(this.passedTests / this.totalTests * 100) : 0;
-    
-    console.log('\n🍄 Shrooms RAG Quality Test Report');
-    console.log('='.repeat(60));
-    console.log(`🕒 Test Duration: ${Math.round(testDuration / 1000)}s`);
-    console.log(`📊 Total Tests: ${this.totalTests}`);
-    console.log(`✅ Passed: ${this.passedTests} (${successRate}%)`);
-    console.log(`❌ Failed: ${this.failedTests} (${Math.round(this.failedTests / this.totalTests * 100)}%)`);
-    if (this.skippedTests > 0) {
-      console.log(`⏭️ Skipped: ${this.skippedTests}`);
-    }
-    console.log('='.repeat(60));
-
-    // Анализ результатов по категориям
-    const testsByCategory = {};
-    this.results.details.forEach(detail => {
-      const category = detail.test;
-      if (!testsByCategory[category]) {
-        testsByCategory[category] = { total: 0, passed: 0 };
-      }
-      testsByCategory[category].total++;
-      if (detail.passed) {
-        testsByCategory[category].passed++;
-      }
-    });
-
-    console.log('\n📈 Results by Test Category:');
-    Object.entries(testsByCategory).forEach(([category, stats]) => {
-      const rate = Math.round(stats.passed / stats.total * 100);
-      const emoji = rate >= 80 ? '✅' : rate >= 60 ? '⚠️' : '❌';
-      console.log(`  ${emoji} ${category}: ${stats.passed}/${stats.total} (${rate}%)`);
-    });
-
-    // Анализ по языкам
-    const testsByLanguage = {};
-    this.results.details.forEach(detail => {
-      if (detail.language) {
-        if (!testsByLanguage[detail.language]) {
-          testsByLanguage[detail.language] = { total: 0, passed: 0 };
-        }
-        testsByLanguage[detail.language].total++;
-        if (detail.passed) {
-          testsByLanguage[detail.language].passed++;
-        }
-      }
-    });
-
-    if (Object.keys(testsByLanguage).length > 0) {
-      console.log('\n🌍 Results by Language:');
-      Object.entries(testsByLanguage).forEach(([language, stats]) => {
-        const rate = Math.round(stats.passed / stats.total * 100);
-        const emoji = rate >= 80 ? '✅' : rate >= 60 ? '⚠️' : '❌';
-        console.log(`  ${emoji} ${language}: ${stats.passed}/${stats.total} (${rate}%)`);
-      });
-    }
-
-    // Сохраняем детальный отчет в файл
-    const reportData = {
-      timestamp: new Date().toISOString(),
-      testDuration: testDuration,
-      summary: {
-        total: this.totalTests,
-        passed: this.passedTests,
-        failed: this.failedTests,
-        skipped: this.skippedTests,
-        successRate: successRate
-      },
-      categoryStats: testsByCategory,
-      languageStats: testsByLanguage,
-      details: this.results.details
-    };
-
-    const reportPath = path.join(__dirname, `../logs/rag-test-report-${Date.now()}.json`);
+    // Здесь должна быть логика добавления документов в векторную базу
+    // Для тестов можно использовать mock или реальное API
     try {
-      // Создаем директорию logs если не существует
-      const logsDir = path.dirname(reportPath);
-      if (!fs.existsSync(logsDir)) {
-        fs.mkdirSync(logsDir, { recursive: true });
-      }
-      
-      fs.writeFileSync(reportPath, JSON.stringify(reportData, null, 2));
-      console.log(`\n📁 Detailed report saved to: ${reportPath}`);
+        for (const doc of testDocuments) {
+            await request(app)
+                .post('/api/knowledge')
+                .send(doc);
+        }
+        console.log('✅ Тестовая база знаний настроена');
     } catch (error) {
-      console.log(`\n⚠️ Could not save report: ${error.message}`);
+        console.warn('⚠️ Ошибка настройки тестовой базы знаний:', error.message);
     }
-
-    // Рекомендации на основе результатов
-    console.log('\n🔍 Recommendations:');
-    if (successRate >= 90) {
-      console.log('  🎉 Excellent RAG performance! System is working optimally.');
-    } else if (successRate >= 70) {
-      console.log('  👍 Good RAG performance with room for improvement.');
-      console.log('  💡 Consider expanding knowledge base for failed queries.');
-    } else if (successRate >= 50) {
-      console.log('  ⚠️ Moderate RAG performance. Investigate failed tests.');
-      console.log('  💡 Check vector store configuration and thresholds.');
-    } else {
-      console.log('  🚨 Poor RAG performance. Immediate attention required.');
-      console.log('  💡 Verify knowledge base content and RAG configuration.');
-    }
-
-    // Финальный статус
-    console.log('\n' + '='.repeat(60));
-    if (successRate >= 80) {
-      console.log('🍄 RAG Quality Test: PASSED ✅');
-    } else {
-      console.log('🍄 RAG Quality Test: NEEDS IMPROVEMENT ⚠️');
-    }
-    console.log('='.repeat(60));
-
-    // Возвращаем результаты
-    return reportData;
-  }
 }
 
-// Экспорт для использования в тестах
 module.exports = {
-  RAGQualityTester,
-  RAG_TEST_SCENARIOS
+    setupTestKnowledgeBase
 };
-
-// Запуск тестов при прямом выполнении файла
-if (require.main === module) {
-  const tester = new RAGQualityTester();
-  tester.runAllTests()
-    .then((results) => {
-      console.log('\n🎉 RAG Quality Testing completed!');
-      const successRate = results.summary.successRate;
-      process.exit(successRate >= 70 ? 0 : 1); // Exit code 0 если успех >= 70%
-    })
-    .catch(error => {
-      console.error('\n💥 RAG Quality Testing failed:', error);
-      process.exit(1);
-    });
-}
