@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍄 Shrooms Chat Test - RAG Edition</title>
+    <style>
+        body {
+            font-family: 'Inter', Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+        .header {
+            text-align: center;
+            border: 2px solid #39FF14;
+            border-radius: 15px;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+            margin-bottom: 20px;
+            box-shadow: 0 0 20px rgba(57, 255, 20, 0.3);
+        }
+        .header h1 {
+            margin: 0;
+            color: #39FF14;
+            text-shadow: 0 0 10px rgba(57, 255, 20, 0.5);
+        }
+        .main-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .chat-panel, .rag-panel {
+            border: 2px solid #39FF14;
+            border-radius: 10px;
+            padding: 20px;
+            background-color: #1e1e1e;
+        }
+        .chat-messages {
+            border: 1px solid #555;
+            padding: 15px;
+            margin: 10px 0;
+            height: 300px;
+            overflow-y: scroll;
+            background-color: #0a0a0a;
+            border-radius: 8px;
+        }
+        .rag-results {
+            border: 1px solid #8A2BE2;
+            padding: 15px;
+            margin: 10px 0;
+            height: 300px;
+            overflow-y: scroll;
+            background-color: #1a0a1a;
+            border-radius: 8px;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+            position: relative;
+        }
+        .user-message {
+            background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
+            text-align: right;
+            margin-left: 20%;
+            border-left: 3px solid #39FF14;
+        }
+        .bot-message {
+            background: linear-gradient(135deg, #1a2a1a 0%, #2a3a2a 100%);
+            color: #39FF14;
+            margin-right: 20%;
+            border-left: 3px solid #39FF14;
+        }
+        .bot-message.with-rag {
+            border-left: 3px solid #8A2BE2;
+            background: linear-gradient(135deg, #2a1a2a 0%, #3a2a3a 100%);
+        }
+        .rag-indicator {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #8A2BE2;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .document-card {
+            background: #2a1a2a;
+            border: 1px solid #8A2BE2;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .document-score {
+            color: #FF6EC7;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .document-content {
+            color: #e0e0e0;
+            font-size: 13px;
+            margin: 5px 0;
+            line-height: 1.4;
+        }
+        .document-meta {
+            color: #888;
+            font-size: 11px;
+            margin-top: 5px;
+        }
+        input, button, select {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #39FF14;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            border-radius: 6px;
+        }
+        button {
+            background: linear-gradient(135deg, #39FF14 0%, #00FF41 100%);
+            color: #000;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(57, 255, 20, 0.4);
+        }
+        button:disabled {
+            background: #666;
+            color: #999;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        button.secondary {
+            background: linear-gradient(135deg, #8A2BE2 0%, #9A3BF2 100%);
+            color: white;
+        }
+        button.secondary:hover {
+            box-shadow: 0 4px 15px rgba(138, 43, 226, 0.4);
+        }
+        .rag-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .test-scenarios {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+            margin: 10px 0;
+        }
+        .test-scenarios button {
+            font-size: 11px;
+            padding: 6px 8px;
+        }
+        .status-bar {
+            background: #2a2a2a;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .language-toggle {
+            display: flex;
+            gap: 5px;
+            margin: 10px 0;
+            justify-content: center;
+        }
+        .language-toggle button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        .language-toggle button.active {
+            background: #39FF14;
+            color: #000;
+        }
+        .language-toggle button:not(.active) {
+            background: #444;
+            color: #ccc;
+        }
+        .metrics-panel {
+            grid-column: 1 / -1;
+            background: #1a1a1a;
+            border: 2px solid #FF6EC7;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .metric-card {
+            background: #2a2a2a;
+            border: 1px solid #FF6EC7;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+        .metric-value {
+            color: #FF6EC7;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .metric-label {
+            color: #ccc;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .error-message {
+            color: #ff6b6b;
+            background: #2a1a1a;
+            border-left: 3px solid #ff6b6b;
+        }
+        .timestamp {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+            .rag-controls {
+                grid-template-columns: 1fr;
+            }
+            .test-scenarios {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🍄 Shrooms Support Bot - RAG Test Interface</h1>
+        <p>Comprehensive testing for Retrieval-Augmented Generation system</p>
+    </div>
+
+    <div class="language-toggle">
+        <span>Language mode:</span>
+        <button id="autoLangBtn" class="active" onclick="setLanguageMode('auto')">Auto-detect</button>
+        <button id="ruLangBtn" onclick="setLanguageMode('ru')">🇷🇺 Russian</button>
+        <button id="enLangBtn" onclick="setLanguageMode('en')">🇺🇸 English</button>
+        <button id="esLangBtn" onclick="setLanguageMode('es')">🇪🇸 Spanish</button>
+    </div>
+
+    <div class="main-container">
+        <!-- Chat Panel -->
+        <div class="chat-panel">
+            <h3>💬 Chat Interface</h3>
+            
+            <div class="chat-messages" id="chatMessages"></div>
+            
+            <div style="display: flex; gap: 10px; margin: 10px 0;">
+                <input type="text" id="messageInput" placeholder="Введите ваш вопрос..." style="flex: 1;">
+                <button onclick="sendMessage()" id="sendBtn">Send</button>
+            </div>
+
+            <div class="rag-controls">
+                <label>
+                    <input type="checkbox" id="enableRag" checked> Enable RAG
+                </label>
+                <label>
+                    <input type="checkbox" id="compareMode"> Compare with/without RAG
+                </label>
+            </div>
+
+            <div class="test-scenarios">
+                <button onclick="testWalletConnection()">Wallet Help</button>
+                <button onclick="testStaking()">Staking Info</button>
+                <button onclick="testTokenomics()">Tokenomics</button>
+                <button onclick="testTechnical()">Technical</button>
+                <button onclick="testOffTopic()">Off-topic</button>
+                <button onclick="testMultilingual()">Multi-lang</button>
+            </div>
+
+            <div style="margin-top: 10px;">
+                <button onclick="clearChat()" class="secondary">Clear Chat</button>
+                <button onclick="runRagTests()" class="secondary">Run RAG Tests</button>
+            </div>
+        </div>
+
+        <!-- RAG Analysis Panel -->
+        <div class="rag-panel">
+            <h3>🧠 RAG Analysis</h3>
+            
+            <div class="rag-results" id="ragResults">
+                <div style="color: #888; text-align: center; margin-top: 100px;">
+                    Send a message to see RAG analysis...
+                </div>
+            </div>
+
+            <div style="margin: 10px 0;">
+                <button onclick="testRagSearch()" class="secondary">Test Vector Search</button>
+                <button onclick="showKnowledgeStats()" class="secondary">Knowledge Stats</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Metrics Panel -->
+    <div class="metrics-panel">
+        <h3>📊 RAG Performance Metrics</h3>
+        <div class="metrics-grid" id="metricsGrid">
+            <div class="metric-card">
+                <div class="metric-value" id="totalQueries">0</div>
+                <div class="metric-label">Total Queries</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="ragUsageRate">0%</div>
+                <div class="metric-label">RAG Usage Rate</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="avgDocuments">0</div>
+                <div class="metric-label">Avg. Documents Found</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="avgRelevance">0</div>
+                <div class="metric-label">Avg. Relevance Score</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="responseTime">0ms</div>
+                <div class="metric-label">Avg. Response Time</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="languageBreakdown">N/A</div>
+                <div class="metric-label">Language Breakdown</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar" id="statusBar">
+        🍄 Ready to test RAG functionality...
+    </div>
+
+    <script>
+        // Global state
+        const API_BASE = window.location.origin + '/api';
+        let userId = 'rag-test-user-' + Date.now();
+        let conversationId = null;
+        let languageMode = 'auto';
+        let metrics = {
+            totalQueries: 0,
+            ragQueries: 0,
+            totalDocuments: 0,
+            totalRelevance: 0,
+            responseTimes: [],
+            languageCounts: { en: 0, ru: 0, es: 0 }
+        };
+
+        // Language management
+        function setLanguageMode(mode) {
+            languageMode = mode;
+            updateStatus(`🔤 Language mode: ${mode}`);
+            
+            // Update UI
+            document.querySelectorAll('.language-toggle button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(mode + 'LangBtn').classList.add('active');
+        }
+
+        // Chat functionality
+        async function sendMessage(message = null) {
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const enableRag = document.getElementById('enableRag').checked;
+            const compareMode = document.getElementById('compareMode').checked;
+            
+            const userMessage = message || messageInput.value.trim();
+            if (!userMessage) return;
+
+            // Clear input and disable controls
+            messageInput.value = '';
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+
+            // Add user message to chat
+            addChatMessage(userMessage, 'user');
+            
+            const startTime = Date.now();
+            updateStatus('⏳ Processing message...');
+
+            try {
+                if (compareMode) {
+                    // Send both with and without RAG
+                    await sendComparisonMessages(userMessage);
+                } else {
+                    // Send single message
+                    await sendSingleMessage(userMessage, enableRag);
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                addChatMessage(`Error: ${error.message}`, 'bot', true);
+                updateStatus(`❌ Error: ${error.message}`);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+                messageInput.focus();
+            }
+        }
+
+        async function sendSingleMessage(message, useRag) {
+            const startTime = Date.now();
+            
+            const requestBody = {
+                message: message,
+                userId: userId,
+                conversationId: conversationId,
+                useRag: useRag
+            };
+
+            if (languageMode !== 'auto') {
+                requestBody.language = languageMode;
+            }
+
+            const response = await fetch(`${API_BASE}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody)
+            });
+
+            const data = await response.json();
+            const responseTime = Date.now() - startTime;
+
+            if (response.ok && data.success) {
+                // Update conversation ID
+                conversationId = data.data.conversationId;
+                
+                // Add bot response
+                addChatMessage(data.data.message, 'bot', false, data.data.metadata?.ragUsed);
+                
+                // Update RAG analysis if RAG was used
+                if (data.data.metadata?.ragUsed && data.data.metadata?.knowledgeResultsCount > 0) {
+                    await showRagAnalysis(message, data.data.metadata?.knowledgeResultsCount);
+                }
+
+                // Update metrics
+                updateMetrics(data, responseTime);
+                
+                updateStatus(`✅ Message sent (${responseTime}ms, ${data.data.language})`);
+            } else {
+                throw new Error(data.error || 'Unknown error');
+            }
+        }
+
+        async function sendComparisonMessages(message) {
+            updateStatus('🔄 Comparing with/without RAG...');
+            
+            // Send without RAG
+            addChatMessage('🚫 Response WITHOUT RAG:', 'system');
+            await sendSingleMessage(message, false);
+            
+            // Small delay
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Send with RAG
+            addChatMessage('🧠 Response WITH RAG:', 'system');
+            await sendSingleMessage(message, true);
+        }
+
+        async function showRagAnalysis(query, docCount) {
+            try {
+                const response = await fetch(`${API_BASE}/chat/test-rag`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        language: languageMode === 'auto' ? undefined : languageMode,
+                        thresholds: [0.9, 0.8, 0.7, 0.6, 0.5]
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    displayRagResults(data.data);
+                }
+            } catch (error) {
+                console.error('Error getting RAG analysis:', error);
+            }
+        }
+
+        function displayRagResults(ragData) {
+            const resultsContainer = document.getElementById('ragResults');
+            
+            let html = `
+                <div style="color: #8A2BE2; font-weight: bold; margin-bottom: 10px;">
+                    📊 RAG Analysis for: "${ragData.query}"
+                </div>
+            `;
+
+            // Show automatic search results
+            if (ragData.automaticSearch && ragData.automaticSearch.documents) {
+                html += `<div style="margin: 10px 0;"><strong>🎯 Found Documents:</strong></div>`;
+                ragData.automaticSearch.documents.forEach((doc, index) => {
+                    html += `
+                        <div class="document-card">
+                            <div class="document-score">Score: ${doc.score}</div>
+                            <div class="document-content">${doc.preview}</div>
+                            <div class="document-meta">ID: ${doc.id}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            // Show threshold analysis
+            html += `<div style="margin: 15px 0 5px 0;"><strong>🔍 Threshold Analysis:</strong></div>`;
+            Object.entries(ragData.resultsByThreshold).forEach(([threshold, results]) => {
+                const color = results.count > 0 ? '#39FF14' : '#666';
+                html += `
+                    <div style="color: ${color}; font-size: 12px; margin: 2px 0;">
+                        Threshold ${threshold}: ${results.count} documents
+                    </div>
+                `;
+            });
+
+            resultsContainer.innerHTML = html;
+        }
+
+        function addChatMessage(message, type, isError = false, hasRag = false) {
+            const container = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            
+            let className = `message ${type}-message`;
+            if (isError) className += ' error-message';
+            if (hasRag && type === 'bot') className += ' with-rag';
+            
+            messageDiv.className = className;
+            
+            const content = document.createElement('div');
+            content.textContent = message;
+            messageDiv.appendChild(content);
+
+            // Add RAG indicator
+            if (hasRag && type === 'bot') {
+                const ragIndicator = document.createElement('div');
+                ragIndicator.className = 'rag-indicator';
+                ragIndicator.textContent = 'RAG';
+                messageDiv.appendChild(ragIndicator);
+            }
+
+            // Add timestamp
+            const timestamp = document.createElement('div');
+            timestamp.className = 'timestamp';
+            timestamp.textContent = new Date().toLocaleTimeString();
+            messageDiv.appendChild(timestamp);
+
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateMetrics(responseData, responseTime) {
+            metrics.totalQueries++;
+            metrics.responseTimes.push(responseTime);
+            
+            if (responseData.data.metadata?.ragUsed) {
+                metrics.ragQueries++;
+                if (responseData.data.metadata?.knowledgeResultsCount) {
+                    metrics.totalDocuments += responseData.data.metadata.knowledgeResultsCount;
+                }
+            }
+
+            if (responseData.data.language) {
+                metrics.languageCounts[responseData.data.language] = 
+                    (metrics.languageCounts[responseData.data.language] || 0) + 1;
+            }
+
+            updateMetricsDisplay();
+        }
+
+        function updateMetricsDisplay() {
+            document.getElementById('totalQueries').textContent = metrics.totalQueries;
+            document.getElementById('ragUsageRate').textContent = 
+                metrics.totalQueries > 0 ? Math.round((metrics.ragQueries / metrics.totalQueries) * 100) + '%' : '0%';
+            document.getElementById('avgDocuments').textContent = 
+                metrics.ragQueries > 0 ? (metrics.totalDocuments / metrics.ragQueries).toFixed(1) : '0';
+            document.getElementById('responseTime').textContent = 
+                metrics.responseTimes.length > 0 
+                    ? Math.round(metrics.responseTimes.reduce((a, b) => a + b, 0) / metrics.responseTimes.length) + 'ms'
+                    : '0ms';
+            
+            // Language breakdown
+            const totalLang = Object.values(metrics.languageCounts).reduce((a, b) => a + b, 0);
+            if (totalLang > 0) {
+                const breakdown = Object.entries(metrics.languageCounts)
+                    .filter(([lang, count]) => count > 0)
+                    .map(([lang, count]) => `${lang.toUpperCase()}:${count}`)
+                    .join(' ');
+                document.getElementById('languageBreakdown').textContent = breakdown;
+            }
+        }
+
+        // Test scenarios
+        async function testWalletConnection() {
+            const queries = [
+                "How do I connect my Xverse wallet?",
+                "Как подключить кошелек к платформе?",
+                "Wallet connection failed"
+            ];
+            for (const query of queries) {
+                await sendMessage(query);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        async function testStaking() {
+            const queries = [
+                "How does staking work?",
+                "Как работает стейкинг?",
+                "What are the staking rewards?"
+            ];
+            for (const query of queries) {
+                await sendMessage(query);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        async function testTokenomics() {
+            const queries = [
+                "What is SHROOMS tokenomics?",
+                "Token distribution information",
+                "Токеномика SHROOMS"
+            ];
+            for (const query of queries) {
+                await sendMessage(query);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        async function testTechnical() {
+            const queries = [
+                "What blockchain does Shrooms use?",
+                "Smart contract details",
+                "Technical documentation"
+            ];
+            for (const query of queries) {
+                await sendMessage(query);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        async function testOffTopic() {
+            const queries = [
+                "What's the weather today?",
+                "Tell me about Bitcoin",
+                "Расскажи анекдот"
+            ];
+            for (const query of queries) {
+                await sendMessage(query);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        async function testMultilingual() {
+            const queries = [
+                "Hello, how are you?",
+                "Привет, как дела?",
+                "¡Hola! ¿Cómo estás?"
+            ];
+            for (const query of queries) {
+                await sendMessage(query);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        async function runRagTests() {
+            updateStatus('🧪 Running comprehensive RAG tests...');
+            
+            // Test different scenarios
+            await testWalletConnection();
+            await testStaking();
+            await testOffTopic();
+            
+            updateStatus('✅ RAG tests completed!');
+        }
+
+        async function testRagSearch() {
+            const query = prompt("Enter search query for RAG testing:");
+            if (query) {
+                await showRagAnalysis(query, 0);
+            }
+        }
+
+        async function showKnowledgeStats() {
+            try {
+                const response = await fetch(`${API_BASE}/knowledge/stats`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Knowledge Base Stats:\n` +
+                          `Total Documents: ${data.data.documentsCount || 'N/A'}\n` +
+                          `Categories: ${JSON.stringify(data.data.categories || {})}\n` +
+                          `Languages: ${JSON.stringify(data.data.languages || {})}`);
+                }
+            } catch (error) {
+                alert('Error getting knowledge stats: ' + error.message);
+            }
+        }
+
+        function clearChat() {
+            document.getElementById('chatMessages').innerHTML = '';
+            document.getElementById('ragResults').innerHTML = 
+                '<div style="color: #888; text-align: center; margin-top: 100px;">Send a message to see RAG analysis...</div>';
+            conversationId = null;
+            updateStatus('🆕 Chat cleared');
+        }
+
+        function updateStatus(message) {
+            document.getElementById('statusBar').textContent = message;
+        }
+
+        // Event listeners
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Initialize
+        window.onload = function() {
+            document.getElementById('messageInput').focus();
+            updateStatus('🍄 RAG Test Interface loaded. Try asking about wallet connection, staking, or tokenomics!');
+        };
+    </script>
+</body>
+</html>
